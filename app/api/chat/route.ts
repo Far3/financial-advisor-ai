@@ -6,6 +6,9 @@ import { chatCompletionWithTools } from '@/lib/openai'
 import { sendEmail } from '@/lib/gmail'
 import { searchContactByEmail, getHubSpotClient } from '@/lib/hubspot'
 import { listEvents, findAvailableSlots, createCalendarEvent, testCalendarAccess } from '@/lib/calendar'
+import { createTask, addTaskMessage, updateTask } from '@/lib/tasks'
+
+
 
 // Define available tools
 const tools: Array<{
@@ -132,6 +135,35 @@ const tools: Array<{
             }
           },
           required: ['title', 'start_time']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'schedule_meeting_with_contact',
+        description: 'Schedule a meeting with a contact by finding their info, checking availability, and emailing them with options',
+        parameters: {
+          type: 'object',
+          properties: {
+            contact_name: {
+              type: 'string',
+              description: 'Name of the contact to schedule with (e.g., "Sara Smith")'
+            },
+            contact_email: {
+              type: 'string',
+              description: 'Email of the contact (optional if you need to look it up)'
+            },
+            meeting_duration: {
+              type: 'number',
+              description: 'Duration in minutes (default: 60)'
+            },
+            notes: {
+              type: 'string',
+              description: 'Any additional notes about the meeting purpose'
+            }
+          },
+          required: ['contact_name']
         }
       }
     }
@@ -549,6 +581,157 @@ Answer questions based on the data above and use tools when the user requests ac
             return NextResponse.json({
               success: true,
               response: `Error creating event: ${errorMessage}`,
+              emailsFound: relevantEmails.length,
+              contactsFound: relevantContacts.length
+            })
+          }
+        }
+
+        // SCHEDULE MEETING WITH CONTACT
+        if (functionName === 'schedule_meeting_with_contact') {
+          console.log('=== SCHEDULE MEETING HANDLER ===')
+
+          try {
+            if (!user?.google_access_token || !user?.hubspot_access_token) {
+              return NextResponse.json({
+                success: true,
+                response: 'I need access to both your Google Calendar and HubSpot to schedule meetings.',
+                emailsFound: relevantEmails.length,
+                contactsFound: relevantContacts.length
+              })
+            }
+
+            const contactName = args.contact_name
+            const duration = args.meeting_duration || 60
+
+            console.log('Looking up contact:', contactName)
+
+            // Try to find contact in HubSpot or emails
+            let contactEmail = args.contact_email
+            let contactInfo = null
+
+            if (!contactEmail) {
+              // Search in contacts
+              const contacts = await supabase
+                .from('contacts')
+                .select('*')
+                .eq('user_id', userId)
+                .ilike('name', `%${contactName}%`)
+                .limit(1)
+
+              if (contacts.data && contacts.data.length > 0) {
+                contactInfo = contacts.data[0]
+                contactEmail = contactInfo.email
+                console.log('Found contact in database:', contactEmail)
+              }
+            }
+
+            if (!contactEmail) {
+              return NextResponse.json({
+                success: true,
+                response: `I couldn't find contact information for ${contactName}. Could you provide their email address?`,
+                emailsFound: relevantEmails.length,
+                contactsFound: relevantContacts.length
+              })
+            }
+
+            // Find available times
+            const startDate = new Date()
+            const endDate = new Date()
+            endDate.setDate(endDate.getDate() + 7)
+
+            console.log('Finding available slots...')
+            const availableSlots = await findAvailableSlots(
+              user.google_access_token,
+              startDate,
+              endDate,
+              duration
+            )
+
+            if (availableSlots.length === 0) {
+              return NextResponse.json({
+                success: true,
+                response: 'I couldn\'t find any available time slots in the next week. Please check your calendar.',
+                emailsFound: relevantEmails.length,
+                contactsFound: relevantContacts.length
+              })
+            }
+
+            // Take first 3-5 slots
+            const proposedTimes = availableSlots.slice(0, 3)
+
+            // Create task to track this scheduling
+            const task = await createTask(
+              userId,
+              'schedule_meeting',
+              {
+                contact_name: contactName,
+                contact_email: contactEmail,
+                duration,
+                proposed_times: proposedTimes.map(slot => ({
+                  start: slot.start.toISOString(),
+                  end: slot.end.toISOString()
+                })),
+                notes: args.notes || ''
+              },
+              conversationHistory
+            )
+
+            if (!task) {
+              throw new Error('Failed to create task')
+            }
+
+            // Build email with available times
+            const timesText = proposedTimes.map((slot, i) =>
+              `${i + 1}. ${slot.start.toLocaleDateString()} at ${slot.start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+            ).join('\n')
+
+            const emailSubject = 'Schedule a Meeting'
+            const emailBody = `Hi ${contactName},
+
+I'd like to schedule a meeting with you. Here are some times that work for me:
+
+${timesText}
+
+Please let me know which time works best for you, or suggest an alternative time if none of these work.
+
+Looking forward to connecting!
+
+Best regards`
+
+            // Send the email
+            console.log('Sending scheduling email to:', contactEmail)
+            await sendEmail(
+              user.google_access_token,
+              contactEmail,
+              emailSubject,
+              emailBody
+            )
+
+            // Update task to waiting for response
+            await updateTask(task.id, {
+              status: 'waiting_response',
+              waiting_for: `email_reply_from:${contactEmail}`,
+              last_action: 'sent_scheduling_email'
+            })
+
+            await addTaskMessage(task.id, 'assistant', `Sent scheduling email with ${proposedTimes.length} time options`)
+
+            return NextResponse.json({
+              success: true,
+              response: `✓ I've emailed ${contactName} (${contactEmail}) with ${proposedTimes.length} available time slots:\n\n${timesText}\n\nI'll monitor for their response and will schedule the meeting once they reply with their preference.`,
+              emailsFound: relevantEmails.length,
+              contactsFound: relevantContacts.length,
+              actionTaken: 'scheduling_initiated',
+              taskId: task.id
+            })
+
+          } catch (error: unknown) {
+            console.error('Schedule meeting error:', error)
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+            return NextResponse.json({
+              success: true,
+              response: `Error scheduling meeting: ${errorMessage}`,
               emailsFound: relevantEmails.length,
               contactsFound: relevantContacts.length
             })
