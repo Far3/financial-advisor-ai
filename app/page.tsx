@@ -6,7 +6,7 @@ import { useSearchParams } from 'next/navigation'
 function ChatInterface() {
   const searchParams = useSearchParams()
   const userId = searchParams.get('user')
-  const [messages, setMessages] = useState<Array<{role: string, content: string}>>([])
+  const [messages, setMessages] = useState<Array<{ role: string, content: string }>>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -15,11 +15,11 @@ function ChatInterface() {
   const syncGmail = async () => {
     setSyncing(true)
     setSyncMessage('Syncing emails...')
-    
+
     try {
       const response = await fetch('/api/sync/gmail', { method: 'POST' })
       const data = await response.json()
-      
+
       if (data.success) {
         setSyncMessage(data.message)
       } else {
@@ -33,14 +33,35 @@ function ChatInterface() {
     }
   }
 
+  const syncHubSpot = async () => {
+    setSyncing(true)
+    setSyncMessage('Syncing HubSpot contacts...')
+
+    try {
+      const response = await fetch('/api/sync/hubspot', { method: 'POST' })
+      const data = await response.json()
+
+      if (data.success) {
+        setSyncMessage(data.message)
+      } else {
+        setSyncMessage(`Error: ${data.error}`)
+      }
+    } catch (error) {
+      console.error('HubSpot sync error:', error)
+      setSyncMessage('HubSpot sync failed')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   const sendMessage = async () => {
     if (!input.trim() || loading) return
-    
+
     const userMessage = { role: 'user', content: input }
     setMessages(prev => [...prev, userMessage])
     setInput('')
     setLoading(true)
-    
+
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -50,9 +71,9 @@ function ChatInterface() {
           conversationHistory: messages
         })
       })
-      
+
       const data = await response.json()
-      
+
       if (data.success) {
         setMessages(prev => [...prev, {
           role: 'assistant',
@@ -111,7 +132,15 @@ function ChatInterface() {
             >
               {syncing ? 'Syncing...' : 'Sync Gmail'}
             </button>
-            
+
+            <button
+              onClick={syncHubSpot}
+              disabled={syncing}
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 transition text-sm"
+            >
+              {syncing ? 'Syncing...' : 'Sync HubSpot'}
+            </button>
+
             {searchParams.get('hubspot') === 'connected' ? (
               <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">
                 ✓ HubSpot Connected
@@ -143,19 +172,18 @@ function ChatInterface() {
             <p className="text-sm mt-2">Try: &quot;Who mentioned their kid plays baseball?&quot;</p>
           </div>
         )}
-        
+
         {messages.map((msg, i) => (
           <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[70%] rounded-lg px-4 py-2 ${
-              msg.role === 'user' 
-                ? 'bg-blue-600 text-white' 
+            <div className={`max-w-[70%] rounded-lg px-4 py-2 ${msg.role === 'user'
+                ? 'bg-blue-600 text-white'
                 : 'bg-white border shadow-sm'
-            }`}>
+              }`}>
               {msg.content}
             </div>
           </div>
         ))}
-        
+
         {loading && (
           <div className="flex justify-start">
             <div className="bg-white border shadow-sm rounded-lg px-4 py-2">

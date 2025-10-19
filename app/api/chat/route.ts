@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { supabase } from '@/lib/supabase'
-import { searchEmails } from '@/lib/vector-search'
+import { searchAll } from '@/lib/vector-search'
 import { chatCompletionWithTools } from '@/lib/openai'
 import { sendEmail } from '@/lib/gmail'
 
@@ -19,32 +19,32 @@ const tools: Array<{
     };
   };
 }> = [
-  {
-    type: 'function',
-    function: {
-      name: 'send_email',
-      description: 'Send an email to someone via Gmail',
-      parameters: {
-        type: 'object',
-        properties: {
-          to: {
-            type: 'string',
-            description: 'The recipient email address'
+    {
+      type: 'function',
+      function: {
+        name: 'send_email',
+        description: 'Send an email to someone via Gmail',
+        parameters: {
+          type: 'object',
+          properties: {
+            to: {
+              type: 'string',
+              description: 'The recipient email address'
+            },
+            subject: {
+              type: 'string',
+              description: 'The email subject line'
+            },
+            body: {
+              type: 'string',
+              description: 'The email body content'
+            }
           },
-          subject: {
-            type: 'string',
-            description: 'The email subject line'
-          },
-          body: {
-            type: 'string',
-            description: 'The email body content'
-          }
-        },
-        required: ['to', 'subject', 'body']
+          required: ['to', 'subject', 'body']
+        }
       }
     }
-  }
-]
+  ]
 
 export async function POST(request: NextRequest) {
   try {
@@ -65,15 +65,16 @@ export async function POST(request: NextRequest) {
       .eq('id', userId)
       .single()
 
-    // Search for relevant emails
+    // Search for relevant emails AND contacts
     console.log('Searching for:', message)
-    const relevantEmails = await searchEmails(userId, message, 20)
-    console.log(`Found ${relevantEmails.length} relevant emails`)
+    const { emails: relevantEmails, contacts: relevantContacts } = await searchAll(userId, message)
+    console.log(`Found ${relevantEmails.length} emails, ${relevantContacts.length} contacts`)
 
-    // Build context from emails
+    // Build context from emails and contacts
     let context = ''
+
     if (relevantEmails.length > 0) {
-      context = 'Here are relevant emails from the user\'s inbox:\n\n'
+      context += 'EMAILS from the user\'s inbox:\n\n'
       relevantEmails.forEach((email: {
         from_email?: string;
         subject?: string;
@@ -84,6 +85,24 @@ export async function POST(request: NextRequest) {
         context += `Subject: ${email.subject}\n`
         context += `Body: ${email.body?.slice(0, 500) || ''}...\n\n`
       })
+    }
+
+    if (relevantContacts.length > 0) {
+      context += '\nCONTACTS from HubSpot CRM:\n\n'
+      relevantContacts.forEach((contact: {
+        name?: string;
+        email?: string;
+        notes?: string;
+      }, i: number) => {
+        context += `Contact ${i + 1}:\n`
+        context += `Name: ${contact.name}\n`
+        context += `Email: ${contact.email}\n`
+        context += `Notes: ${contact.notes || 'No notes'}\n\n`
+      })
+    }
+
+    if (!context) {
+      context = 'No relevant emails or contacts found.'
     }
 
     // Build messages for GPT with tools
@@ -115,13 +134,13 @@ Answer questions based on the email data above.`
     // Get GPT response with function calling
     const choice = await chatCompletionWithTools(messages, tools)
 
-// Check if GPT wants to call a function
-if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
-  const toolCall = choice.message.tool_calls[0]
-  
-  // Check if it's a function tool call
-  if (toolCall.type === 'function' && toolCall.function.name === 'send_email') {
-    const args = JSON.parse(toolCall.function.arguments)
+    // Check if GPT wants to call a function
+    if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
+      const toolCall = choice.message.tool_calls[0]
+
+      // Check if it's a function tool call
+      if (toolCall.type === 'function' && toolCall.function.name === 'send_email') {
+        const args = JSON.parse(toolCall.function.arguments)
 
         console.log('Sending email:', args)
 
@@ -146,7 +165,7 @@ if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
             success: true,
             response: `✓ Email sent successfully to ${args.to}!\n\nSubject: ${args.subject}\n\nBody:\n${args.body}`,
             emailsFound: relevantEmails.length,
-            actionTaken: 'email_sent'
+            actionTaken: 'email_sent',
           })
 
         } catch (error: unknown) {
@@ -164,12 +183,13 @@ if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
     return NextResponse.json({
       success: true,
       response: choice.message.content || 'Sorry, I could not generate a response.',
-      emailsFound: relevantEmails.length
+      emailsFound: relevantEmails.length,
+      contactsFound: relevantContacts.length
     })
 
   } catch (error: unknown) {
     console.error('Chat error:', error)
-      const errorMessage = error instanceof Error ? error.message : 'Chat failed'
+    const errorMessage = error instanceof Error ? error.message : 'Chat failed'
     return NextResponse.json({
       error: errorMessage || 'Chat failed'
     }, { status: 500 })
