@@ -13,7 +13,7 @@ const tools = [
       name: 'send_email',
       description: 'Send an email to someone via Gmail',
       parameters: {
-        type: 'object',
+        type: 'object' as const,
         properties: {
           to: {
             type: 'string',
