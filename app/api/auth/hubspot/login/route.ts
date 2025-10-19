@@ -10,7 +10,8 @@ export async function GET() {
   const userId = cookieStore.get('user_id')?.value
   
   if (!userId) {
-    return NextResponse.redirect('http://localhost:3000?error=not_logged_in')
+    const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000'
+    return NextResponse.redirect(`${baseUrl}?error=not_logged_in`)
   }
   
   const scopes = [

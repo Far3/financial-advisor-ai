@@ -10,7 +10,9 @@ export async function GET(request: NextRequest) {
   const userId = cookieStore.get('user_id')?.value
   
   if (!code || !userId) {
-    return NextResponse.redirect(new URL('/?error=hubspot_auth_failed', request.url))
+    const baseUrl = process.env.NEXTAUTH_URL || request.nextUrl.origin
+    return NextResponse.redirect(new URL('/?error=no_code', baseUrl))
+
   }
   
   try {
@@ -45,10 +47,12 @@ export async function GET(request: NextRequest) {
     if (error) throw error
     
     // Redirect back to chat
-    return NextResponse.redirect(new URL(`/?user=${userId}&hubspot=connected`, request.url))
+    const baseUrl = process.env.NEXTAUTH_URL || request.nextUrl.origin
+    return NextResponse.redirect(new URL(`/?user=${userId}&hubspot=connected`, baseUrl))
     
   } catch (error) {
     console.error('HubSpot OAuth error:', error)
-    return NextResponse.redirect(new URL('/?error=hubspot_auth_failed', request.url))
+    const baseUrl = process.env.NEXTAUTH_URL || request.nextUrl.origin
+    return NextResponse.redirect(new URL('/?error=hubspot_auth_failed', baseUrl))
   }
 }

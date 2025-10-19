@@ -6,7 +6,8 @@ export async function GET(request: NextRequest) {
   const code = searchParams.get('code')
   
   if (!code) {
-    return NextResponse.redirect(new URL('/?error=no_code', request.url))
+    const baseUrl = process.env.NEXTAUTH_URL || request.nextUrl.origin
+    return NextResponse.redirect(new URL('/?error=no_code', baseUrl))
   }
   
   try {
@@ -44,10 +45,13 @@ export async function GET(request: NextRequest) {
     
     if (error) throw error
     
+    // Get the base URL (works for both localhost and production)
+    const baseUrl = process.env.NEXTAUTH_URL || request.nextUrl.origin
+
     // Redirect to chat with user ID
-    const response = NextResponse.redirect(new URL(`/?user=${data.id}`, request.url))
+    const response = NextResponse.redirect(new URL(`/?user=${data.id}`, baseUrl))
     response.cookies.set('user_id', data.id, { httpOnly: true, maxAge: 60 * 60 * 24 * 7 })
-    
+
     return response
     
   } catch (error) {
