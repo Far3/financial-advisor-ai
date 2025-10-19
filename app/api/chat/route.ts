@@ -8,7 +8,7 @@ import { sendEmail } from '@/lib/gmail'
 // Define available tools
 const tools = [
   {
-    type: 'function',
+    type: 'function' as const,
     function: {
       name: 'send_email',
       description: 'Send an email to someone via Gmail',
@@ -32,7 +32,7 @@ const tools = [
       }
     }
   }
-]
+] as const
 
 export async function POST(request: NextRequest) {
   try {
