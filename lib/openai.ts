@@ -18,11 +18,16 @@ export async function generateEmbedding(text: string): Promise<number[]> {
   }
 }
 
-export async function chatCompletion(messages: Array<{role: string, content: string}>) {
+type ChatMessage = {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+export async function chatCompletion(messages: ChatMessage[]) {
   try {
     const response = await openai.chat.completions.create({
       model: 'gpt-4',
-      messages: messages as any,
+      messages: messages as Array<{role: 'system' | 'user' | 'assistant', content: string}>,
       temperature: 0.7,
       max_tokens: 500
     })
@@ -34,16 +39,24 @@ export async function chatCompletion(messages: Array<{role: string, content: str
   }
 }
 
+type Tool = {
+  type: string;
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
 // Function calling version
 export async function chatCompletionWithTools(
-  messages: Array<{role: string, content: string}>,
-  tools: any[]
+  messages: ChatMessage[],
+  tools: Tool[]
 ) {
   try {
     const response = await openai.chat.completions.create({
       model: 'gpt-4',
-      messages: messages as any,
-      tools,
+      messages: messages as Array<{ role: 'system' | 'user' | 'assistant', content: string }>,
       tool_choice: 'auto',
       temperature: 0.7,
       max_tokens: 500

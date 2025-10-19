@@ -38,38 +38,42 @@ export async function POST(request: NextRequest) {
   try {
     const cookieStore = cookies()
     const userId = cookieStore.get('user_id')?.value
-    
+
     if (!userId) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
     }
-    
+
     const body = await request.json()
     const { message, conversationHistory = [] } = body
-    
+
     // Get user's Google token for sending emails
     const { data: user } = await supabase
       .from('users')
       .select('google_access_token')
       .eq('id', userId)
       .single()
-    
+
     // Search for relevant emails
     console.log('Searching for:', message)
     const relevantEmails = await searchEmails(userId, message, 20)
     console.log(`Found ${relevantEmails.length} relevant emails`)
-    
+
     // Build context from emails
     let context = ''
     if (relevantEmails.length > 0) {
       context = 'Here are relevant emails from the user\'s inbox:\n\n'
-      relevantEmails.forEach((email: any, i: number) => {
+      relevantEmails.forEach((email: {
+        from_email?: string;
+        subject?: string;
+        body?: string;
+      }, i: number) => {
         context += `Email ${i + 1}:\n`
         context += `From: ${email.from_email}\n`
         context += `Subject: ${email.subject}\n`
         context += `Body: ${email.body?.slice(0, 500) || ''}...\n\n`
       })
     }
-    
+
     // Build messages for GPT with tools
     const messages = [
       {
@@ -95,19 +99,19 @@ Answer questions based on the email data above.`
         content: message
       }
     ]
-    
+
     // Get GPT response with function calling
     const choice = await chatCompletionWithTools(messages, tools)
-    
+
     // Check if GPT wants to call a function
     if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
       const toolCall = choice.message.tool_calls[0]
-      
+
       if (toolCall.function.name === 'send_email') {
         const args = JSON.parse(toolCall.function.arguments)
-        
+
         console.log('Sending email:', args)
-        
+
         try {
           if (!user?.google_access_token) {
             return NextResponse.json({
@@ -116,7 +120,7 @@ Answer questions based on the email data above.`
               emailsFound: relevantEmails.length
             })
           }
-          
+
           // Actually send the email
           await sendEmail(
             user.google_access_token,
@@ -124,36 +128,37 @@ Answer questions based on the email data above.`
             args.subject,
             args.body
           )
-          
+
           return NextResponse.json({
             success: true,
             response: `✓ Email sent successfully to ${args.to}!\n\nSubject: ${args.subject}\n\nBody:\n${args.body}`,
             emailsFound: relevantEmails.length,
             actionTaken: 'email_sent'
           })
-          
-        } catch (error: any) {
-          console.error('Error sending email:', error)
+
+        } catch (error: unknown) {
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error'
           return NextResponse.json({
             success: true,
-            response: `I tried to send the email but encountered an error: ${error.message}. Your Gmail token might need to be refreshed.`,
+            response: `I tried to send the email but encountered an error: ${errorMessage}. Your Gmail token might need to be refreshed.`,
             emailsFound: relevantEmails.length
           })
         }
       }
     }
-    
+
     // Regular response (no tool call)
     return NextResponse.json({
       success: true,
       response: choice.message.content || 'Sorry, I could not generate a response.',
       emailsFound: relevantEmails.length
     })
-    
-  } catch (error: any) {
+
+  } catch (error: unknown) {
     console.error('Chat error:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Chat failed'
     return NextResponse.json({
-      error: error.message || 'Chat failed'
+      error: errorMessage || 'Chat failed'
     }, { status: 500 })
   }
 }

@@ -80,10 +80,11 @@ export async function POST(request: NextRequest) {
       total: emails.length
     })
     
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Sync error:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Chat failed'
     return NextResponse.json({ 
-      error: error.message || 'Sync failed' 
+      error: errorMessage || 'Sync failed' 
     }, { status: 500 })
   }
 }

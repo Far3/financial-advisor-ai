@@ -138,7 +138,7 @@ const sendMessage = async () => {
         {messages.length === 0 && (
           <div className="text-center text-gray-500 mt-8">
             <p>Ask me anything about your clients!</p>
-            <p className="text-sm mt-2">Try: "Who mentioned their kid plays baseball?"</p>
+            <p className="text-sm mt-2">Try: &quot;Who mentioned their kid plays baseball?&quot;</p>
           </div>
         )}
 
