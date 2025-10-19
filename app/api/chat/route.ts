@@ -4,8 +4,8 @@ import { supabase } from '@/lib/supabase'
 import { searchAll } from '@/lib/vector-search'
 import { chatCompletionWithTools } from '@/lib/openai'
 import { sendEmail } from '@/lib/gmail'
+import { searchContactByEmail, getHubSpotClient } from '@/lib/hubspot'
 
-// Define available tools
 // Define available tools
 const tools: Array<{
   type: 'function';
@@ -43,6 +43,56 @@ const tools: Array<{
           required: ['to', 'subject', 'body']
         }
       }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'create_hubspot_contact',
+        description: 'Create a new contact in HubSpot CRM',
+        parameters: {
+          type: 'object',
+          properties: {
+            email: {
+              type: 'string',
+              description: 'The contact email address'
+            },
+            firstname: {
+              type: 'string',
+              description: 'The contact first name (optional)'
+            },
+            lastname: {
+              type: 'string',
+              description: 'The contact last name (optional)'
+            },
+            note: {
+              type: 'string',
+              description: 'An initial note to add about this contact (optional)'
+            }
+          },
+          required: ['email']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'add_hubspot_note',
+        description: 'Add a note to an existing HubSpot contact',
+        parameters: {
+          type: 'object',
+          properties: {
+            email: {
+              type: 'string',
+              description: 'The contact email address to add note to'
+            },
+            note: {
+              type: 'string',
+              description: 'The note text to add'
+            }
+          },
+          required: ['email', 'note']
+        }
+      }
     }
   ]
 
@@ -58,10 +108,10 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { message, conversationHistory = [] } = body
 
-    // Get user's Google token for sending emails
+    // Get user's tokens for Gmail and HubSpot
     const { data: user } = await supabase
       .from('users')
-      .select('google_access_token')
+      .select('google_access_token, hubspot_access_token')
       .eq('id', userId)
       .single()
 
@@ -105,24 +155,26 @@ export async function POST(request: NextRequest) {
       context = 'No relevant emails or contacts found.'
     }
 
-    // Build messages for GPT with tools
     const messages = [
       {
         role: 'system',
-        content: `You are an AI assistant for a financial advisor with access to their emails and the ability to send emails.
+        content: `You are an AI assistant for a financial advisor with access to their emails, HubSpot CRM, and various tools.
 
-IMPORTANT: The emails provided below are REAL emails from the user's inbox. Use them to answer questions.
-
-You can also send emails using the send_email function when the user asks you to.
+IMPORTANT: The data provided below is REAL data from the user's accounts.
 
 ${context}
 
-When sending emails:
-- Keep them professional and concise
-- Use appropriate subject lines
-- Confirm before sending if unclear
+AVAILABLE TOOLS:
+- send_email: Send emails via Gmail
+- create_hubspot_contact: Create new contacts in HubSpot CRM
+- add_hubspot_note: Add notes to existing HubSpot contacts
 
-Answer questions based on the email data above.`
+When using tools:
+- Be professional and concise
+- Confirm actions clearly
+- Handle errors gracefully
+
+Answer questions based on the data above and use tools when the user requests actions.`
       },
       ...conversationHistory,
       {
@@ -135,46 +187,161 @@ Answer questions based on the email data above.`
     const choice = await chatCompletionWithTools(messages, tools)
 
     // Check if GPT wants to call a function
+    // Check if GPT wants to call a function
     if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
       const toolCall = choice.message.tool_calls[0]
 
-      // Check if it's a function tool call
-      if (toolCall.type === 'function' && toolCall.function.name === 'send_email') {
+      // Type guard for function tool calls
+      if ('function' in toolCall && toolCall.function) {
+        const functionName = toolCall.function.name
         const args = JSON.parse(toolCall.function.arguments)
 
-        console.log('Sending email:', args)
+        console.log(`Calling tool: ${functionName}`, args)
 
-        try {
-          if (!user?.google_access_token) {
+        // SEND EMAIL
+        if (functionName === 'send_email') {
+          try {
+            if (!user?.google_access_token) {
+              return NextResponse.json({
+                success: true,
+                response: 'I cannot send emails because your Gmail account is not connected properly.',
+                emailsFound: relevantEmails.length,
+                contactsFound: relevantContacts.length
+              })
+            }
+
+            await sendEmail(
+              user.google_access_token,
+              args.to,
+              args.subject,
+              args.body
+            )
+
             return NextResponse.json({
               success: true,
-              response: 'I cannot send emails because your Gmail account is not connected properly. Please reconnect.',
-              emailsFound: relevantEmails.length
+              response: `✓ Email sent to ${args.to}!\n\nSubject: ${args.subject}\n\nBody:\n${args.body}`,
+              emailsFound: relevantEmails.length,
+              contactsFound: relevantContacts.length,
+              actionTaken: 'email_sent'
+            })
+          } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+            return NextResponse.json({
+              success: true,
+              response: `Error sending email: ${errorMessage}`,
+              emailsFound: relevantEmails.length,
+              contactsFound: relevantContacts.length
             })
           }
+        }
 
-          // Actually send the email
-          await sendEmail(
-            user.google_access_token,
-            args.to,
-            args.subject,
-            args.body
-          )
+        // CREATE HUBSPOT CONTACT
+        if (functionName === 'create_hubspot_contact') {
+          try {
+            if (!user?.hubspot_access_token) {
+              return NextResponse.json({
+                success: true,
+                response: 'I cannot create HubSpot contacts because your HubSpot account is not connected.',
+                emailsFound: relevantEmails.length,
+                contactsFound: relevantContacts.length
+              })
+            }
 
-          return NextResponse.json({
-            success: true,
-            response: `✓ Email sent successfully to ${args.to}!\n\nSubject: ${args.subject}\n\nBody:\n${args.body}`,
-            emailsFound: relevantEmails.length,
-            actionTaken: 'email_sent',
-          })
+            // Check if contact already exists
+            const existing = await searchContactByEmail(user.hubspot_access_token, args.email)
 
-        } catch (error: unknown) {
-          const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-          return NextResponse.json({
-            success: true,
-            response: `I tried to send the email but encountered an error: ${errorMessage}. Your Gmail token might need to be refreshed.`,
-            emailsFound: relevantEmails.length
-          })
+            if (existing.found) {
+              return NextResponse.json({
+                success: true,
+                response: `Contact ${args.email} already exists in HubSpot! Name: ${existing.contact?.firstname} ${existing.contact?.lastname}`,
+                emailsFound: relevantEmails.length,
+                contactsFound: relevantContacts.length
+              })
+            }
+
+            // Create the contact
+            const hubspot = await getHubSpotClient(user.hubspot_access_token)
+            const result = await hubspot.contacts.create({
+              email: args.email,
+              firstname: args.firstname || '',
+              lastname: args.lastname || ''
+            })
+
+            // Add initial note if provided
+            if (args.note && result.contactId) {
+              await hubspot.contacts.addNote(result.contactId, args.note)
+            }
+
+            let response = `✓ Created new contact in HubSpot!\n\nEmail: ${args.email}`
+            if (args.firstname || args.lastname) {
+              response += `\nName: ${args.firstname || ''} ${args.lastname || ''}`
+            }
+            if (args.note) {
+              response += `\nNote added: ${args.note}`
+            }
+
+            return NextResponse.json({
+              success: true,
+              response,
+              emailsFound: relevantEmails.length,
+              contactsFound: relevantContacts.length,
+              actionTaken: 'contact_created'
+            })
+          } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+            return NextResponse.json({
+              success: true,
+              response: `Error creating contact: ${errorMessage}`,
+              emailsFound: relevantEmails.length,
+              contactsFound: relevantContacts.length
+            })
+          }
+        }
+
+        // ADD HUBSPOT NOTE
+        if (functionName === 'add_hubspot_note') {
+          try {
+            if (!user?.hubspot_access_token) {
+              return NextResponse.json({
+                success: true,
+                response: 'I cannot add notes because your HubSpot account is not connected.',
+                emailsFound: relevantEmails.length,
+                contactsFound: relevantContacts.length
+              })
+            }
+
+            // Find the contact
+            const existing = await searchContactByEmail(user.hubspot_access_token, args.email)
+
+            if (!existing.found || !existing.contact) {
+              return NextResponse.json({
+                success: true,
+                response: `Contact ${args.email} not found in HubSpot. Would you like me to create them first?`,
+                emailsFound: relevantEmails.length,
+                contactsFound: relevantContacts.length
+              })
+            }
+
+            // Add the note
+            const hubspot = await getHubSpotClient(user.hubspot_access_token)
+            await hubspot.contacts.addNote(existing.contact.hubspot_id, args.note)
+
+            return NextResponse.json({
+              success: true,
+              response: `✓ Added note to ${existing.contact.firstname} ${existing.contact.lastname} (${args.email}):\n\n"${args.note}"`,
+              emailsFound: relevantEmails.length,
+              contactsFound: relevantContacts.length,
+              actionTaken: 'note_added'
+            })
+          } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+            return NextResponse.json({
+              success: true,
+              response: `Error adding note: ${errorMessage}`,
+              emailsFound: relevantEmails.length,
+              contactsFound: relevantContacts.length
+            })
+          }
         }
       }
     }
