@@ -1,5 +1,13 @@
 import { google } from 'googleapis'
 
+// Timeout helper
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  const timeout = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error(`Operation timed out after ${timeoutMs}ms`)), timeoutMs)
+  })
+  return Promise.race([promise, timeout])
+}
+
 export async function getCalendarClient(accessToken: string) {
   const oauth2Client = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
@@ -12,6 +20,25 @@ export async function getCalendarClient(accessToken: string) {
   return google.calendar({ version: 'v3', auth: oauth2Client })
 }
 
+// Test if token is valid
+export async function testCalendarAccess(accessToken: string): Promise<boolean> {
+  try {
+    console.log('Testing calendar access...')
+    const calendar = await getCalendarClient(accessToken)
+    
+    await withTimeout(
+      calendar.calendarList.list({ maxResults: 1 }),
+      5000
+    )
+    
+    console.log('✓ Calendar access test passed')
+    return true
+  } catch (error) {
+    console.error('✗ Calendar access test failed:', error)
+    return false
+  }
+}
+
 // List upcoming events
 export async function listEvents(
   accessToken: string,
@@ -19,20 +46,34 @@ export async function listEvents(
   timeMax?: Date,
   maxResults = 10
 ) {
+  console.log('=== CALENDAR LIST EVENTS START ===')
+  console.log('Token exists:', !!accessToken)
+  console.log('Token preview:', accessToken?.substring(0, 20) + '...')
+  
   try {
     const calendar = await getCalendarClient(accessToken)
     
     const now = timeMin || new Date()
-    const endTime = timeMax || new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000) // 7 days from now
+    const endTime = timeMax || new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
     
-    const response = await calendar.events.list({
-      calendarId: 'primary',
-      timeMin: now.toISOString(),
-      timeMax: endTime.toISOString(),
-      maxResults,
-      singleEvents: true,
-      orderBy: 'startTime'
-    })
+    console.log('Fetching events...')
+    console.log('From:', now.toISOString())
+    console.log('To:', endTime.toISOString())
+    
+    const response = await withTimeout(
+      calendar.events.list({
+        calendarId: 'primary',
+        timeMin: now.toISOString(),
+        timeMax: endTime.toISOString(),
+        maxResults,
+        singleEvents: true,
+        orderBy: 'startTime'
+      }),
+      10000
+    )
+    
+    console.log('✓ Calendar API responded')
+    console.log('Events found:', response.data.items?.length || 0)
     
     const events = response.data.items || []
     
@@ -47,7 +88,12 @@ export async function listEvents(
     }))
     
   } catch (error) {
-    console.error('Error listing events:', error)
+    console.error('=== CALENDAR ERROR ===')
+    if (error instanceof Error) {
+      console.error('Error message:', error.message)
+      console.error('Error name:', error.name)
+    }
+    console.error('Full error:', JSON.stringify(error, null, 2))
     throw error
   }
 }
@@ -95,7 +141,6 @@ export async function findAvailableSlots(
   try {
     const calendar = await getCalendarClient(accessToken)
     
-    // Get all events in the date range
     const response = await calendar.events.list({
       calendarId: 'primary',
       timeMin: startDate.toISOString(),
@@ -111,7 +156,6 @@ export async function findAvailableSlots(
     const businessHourStart = 9
     const businessHourEnd = 17
     
-    // Check each day
     const currentDate = new Date(startDate)
     
     while (currentDate < endDate) {
@@ -121,7 +165,6 @@ export async function findAvailableSlots(
         continue
       }
       
-      // Check each hour in business hours
       for (let hour = businessHourStart; hour < businessHourEnd; hour++) {
         const slotStart = new Date(currentDate)
         slotStart.setHours(hour, 0, 0, 0)
@@ -129,7 +172,6 @@ export async function findAvailableSlots(
         const slotEnd = new Date(slotStart)
         slotEnd.setMinutes(slotEnd.getMinutes() + durationMinutes)
         
-        // Check if this slot conflicts with any events
         const hasConflict = events.some(event => {
           const eventStart = new Date(event.start?.dateTime || event.start?.date || '')
           const eventEnd = new Date(event.end?.dateTime || event.end?.date || '')
@@ -187,7 +229,7 @@ export async function createCalendarEvent(
     const response = await calendar.events.insert({
       calendarId: 'primary',
       requestBody: event,
-      sendUpdates: 'all' // Send email invites to attendees
+      sendUpdates: 'all'
     })
     
     return {

@@ -5,6 +5,7 @@ import { searchAll } from '@/lib/vector-search'
 import { chatCompletionWithTools } from '@/lib/openai'
 import { sendEmail } from '@/lib/gmail'
 import { searchContactByEmail, getHubSpotClient } from '@/lib/hubspot'
+import { listEvents, findAvailableSlots, createCalendarEvent, testCalendarAccess } from '@/lib/calendar'
 
 // Define available tools
 const tools: Array<{
@@ -27,18 +28,9 @@ const tools: Array<{
         parameters: {
           type: 'object',
           properties: {
-            to: {
-              type: 'string',
-              description: 'The recipient email address'
-            },
-            subject: {
-              type: 'string',
-              description: 'The email subject line'
-            },
-            body: {
-              type: 'string',
-              description: 'The email body content'
-            }
+            to: { type: 'string', description: 'The recipient email address' },
+            subject: { type: 'string', description: 'The email subject line' },
+            body: { type: 'string', description: 'The email body content' }
           },
           required: ['to', 'subject', 'body']
         }
@@ -52,22 +44,10 @@ const tools: Array<{
         parameters: {
           type: 'object',
           properties: {
-            email: {
-              type: 'string',
-              description: 'The contact email address'
-            },
-            firstname: {
-              type: 'string',
-              description: 'The contact first name (optional)'
-            },
-            lastname: {
-              type: 'string',
-              description: 'The contact last name (optional)'
-            },
-            note: {
-              type: 'string',
-              description: 'An initial note to add about this contact (optional)'
-            }
+            email: { type: 'string', description: 'The contact email address' },
+            firstname: { type: 'string', description: 'The contact first name (optional)' },
+            lastname: { type: 'string', description: 'The contact last name (optional)' },
+            note: { type: 'string', description: 'An initial note to add about this contact (optional)' }
           },
           required: ['email']
         }
@@ -81,16 +61,77 @@ const tools: Array<{
         parameters: {
           type: 'object',
           properties: {
-            email: {
-              type: 'string',
-              description: 'The contact email address to add note to'
-            },
-            note: {
-              type: 'string',
-              description: 'The note text to add'
-            }
+            email: { type: 'string', description: 'The contact email address to add note to' },
+            note: { type: 'string', description: 'The note text to add' }
           },
           required: ['email', 'note']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'list_calendar_events',
+        description: 'List upcoming events on the user\'s Google Calendar',
+        parameters: {
+          type: 'object',
+          properties: {
+            days: { type: 'number', description: 'Number of days to look ahead (default: 7)' }
+          }
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'find_available_times',
+        description: 'Find available time slots on the user\'s calendar for scheduling meetings',
+        parameters: {
+          type: 'object',
+          properties: {
+            days_ahead: { type: 'number', description: 'How many days ahead to search (default: 7)' },
+            duration_minutes: { type: 'number', description: 'Duration of the meeting in minutes (default: 60)' }
+          }
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'create_calendar_event',
+        description: 'Create a new event on the user\'s Google Calendar',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: {
+              type: 'string',
+              description: 'Event title/summary'
+            },
+            start_time: {
+              type: 'string',
+              description: 'Start time in ISO format (e.g., "2024-10-20T14:00:00")'
+            },
+            duration_minutes: {
+              type: 'number',
+              description: 'Duration in minutes (default: 60)'
+            },
+            description: {
+              type: 'string',
+              description: 'Event description (optional)'
+            },
+            attendees: {
+              type: 'array',
+              items: {
+                type: 'string'
+              },
+              description: 'Array of attendee email addresses (optional)'
+            },
+            location: {
+              type: 'string',
+              description: 'Meeting location (optional)'
+            }
+          },
+          required: ['title', 'start_time']
         }
       }
     }
@@ -108,19 +149,16 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { message, conversationHistory = [] } = body
 
-    // Get user's tokens for Gmail and HubSpot
     const { data: user } = await supabase
       .from('users')
       .select('google_access_token, hubspot_access_token')
       .eq('id', userId)
       .single()
 
-    // Search for relevant emails AND contacts
     console.log('Searching for:', message)
     const { emails: relevantEmails, contacts: relevantContacts } = await searchAll(userId, message)
     console.log(`Found ${relevantEmails.length} emails, ${relevantContacts.length} contacts`)
 
-    // Build context from emails and contacts
     let context = ''
 
     if (relevantEmails.length > 0) {
@@ -188,15 +226,11 @@ Answer questions based on the data above and use tools when the user requests ac
       }
     ]
 
-    // Get GPT response with function calling
     const choice = await chatCompletionWithTools(messages, tools)
 
-    // Check if GPT wants to call a function
-    // Check if GPT wants to call a function
     if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
       const toolCall = choice.message.tool_calls[0]
 
-      // Type guard for function tool calls
       if ('function' in toolCall && toolCall.function) {
         const functionName = toolCall.function.name
         const args = JSON.parse(toolCall.function.arguments)
@@ -215,12 +249,7 @@ Answer questions based on the data above and use tools when the user requests ac
               })
             }
 
-            await sendEmail(
-              user.google_access_token,
-              args.to,
-              args.subject,
-              args.body
-            )
+            await sendEmail(user.google_access_token, args.to, args.subject, args.body)
 
             return NextResponse.json({
               success: true,
@@ -252,7 +281,6 @@ Answer questions based on the data above and use tools when the user requests ac
               })
             }
 
-            // Check if contact already exists
             const existing = await searchContactByEmail(user.hubspot_access_token, args.email)
 
             if (existing.found) {
@@ -264,7 +292,6 @@ Answer questions based on the data above and use tools when the user requests ac
               })
             }
 
-            // Create the contact
             const hubspot = await getHubSpotClient(user.hubspot_access_token)
             const result = await hubspot.contacts.create({
               email: args.email,
@@ -272,7 +299,6 @@ Answer questions based on the data above and use tools when the user requests ac
               lastname: args.lastname || ''
             })
 
-            // Add initial note if provided
             if (args.note && result.contactId) {
               await hubspot.contacts.addNote(result.contactId, args.note)
             }
@@ -315,7 +341,6 @@ Answer questions based on the data above and use tools when the user requests ac
               })
             }
 
-            // Find the contact
             const existing = await searchContactByEmail(user.hubspot_access_token, args.email)
 
             if (!existing.found || !existing.contact) {
@@ -327,7 +352,6 @@ Answer questions based on the data above and use tools when the user requests ac
               })
             }
 
-            // Add the note
             const hubspot = await getHubSpotClient(user.hubspot_access_token)
             await hubspot.contacts.addNote(existing.contact.hubspot_id, args.note)
 
@@ -348,10 +372,191 @@ Answer questions based on the data above and use tools when the user requests ac
             })
           }
         }
+
+        // LIST CALENDAR EVENTS
+        if (functionName === 'list_calendar_events') {
+          console.log('=== CALENDAR HANDLER START ===')
+
+          try {
+            if (!user?.google_access_token) {
+              console.log('No Google token found')
+              return NextResponse.json({
+                success: true,
+                response: 'I cannot access your calendar because your Google account is not connected.',
+                emailsFound: relevantEmails.length,
+                contactsFound: relevantContacts.length
+              })
+            }
+
+            console.log('User has token, testing access...')
+            const hasAccess = await testCalendarAccess(user.google_access_token)
+
+            if (!hasAccess) {
+              console.log('Token test failed - likely expired')
+              return NextResponse.json({
+                success: true,
+                response: 'Your Google Calendar access has expired. Please reconnect your Google account by logging in again.',
+                emailsFound: relevantEmails.length,
+                contactsFound: relevantContacts.length
+              })
+            }
+
+            const days = args.days || 7
+            const endDate = new Date()
+            endDate.setDate(endDate.getDate() + days)
+
+            console.log('Fetching events...')
+            const events = await listEvents(user.google_access_token, new Date(), endDate, 10)
+            console.log('Events received:', events.length)
+
+            if (events.length === 0) {
+              return NextResponse.json({
+                success: true,
+                response: `No events found on your calendar for the next ${days} days.`,
+                emailsFound: relevantEmails.length,
+                contactsFound: relevantContacts.length
+              })
+            }
+
+            let response = `Here are your upcoming events (next ${days} days):\n\n`
+            events.forEach((event, i) => {
+              const startDate = new Date(event.start)
+              response += `${i + 1}. ${event.summary}\n`
+              response += `   When: ${startDate.toLocaleString()}\n`
+              if (event.location) response += `   Where: ${event.location}\n`
+              if (event.attendees.length > 0) response += `   Attendees: ${event.attendees.join(', ')}\n`
+              response += '\n'
+            })
+
+            return NextResponse.json({
+              success: true,
+              response,
+              emailsFound: relevantEmails.length,
+              contactsFound: relevantContacts.length,
+              actionTaken: 'calendar_listed'
+            })
+          } catch (error: unknown) {
+            console.error('=== CALENDAR HANDLER ERROR ===')
+            console.error(error)
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+            return NextResponse.json({
+              success: true,
+              response: `Error accessing calendar: ${errorMessage}. Your Google token may have expired - try logging in again.`,
+              emailsFound: relevantEmails.length,
+              contactsFound: relevantContacts.length
+            })
+          }
+        }
+
+        // FIND AVAILABLE TIMES
+        if (functionName === 'find_available_times') {
+          try {
+            if (!user?.google_access_token) {
+              return NextResponse.json({
+                success: true,
+                response: 'I cannot access your calendar because your Google account is not connected.',
+                emailsFound: relevantEmails.length,
+                contactsFound: relevantContacts.length
+              })
+            }
+
+            const daysAhead = args.days_ahead || 7
+            const duration = args.duration_minutes || 60
+
+            const startDate = new Date()
+            const endDate = new Date()
+            endDate.setDate(endDate.getDate() + daysAhead)
+
+            const slots = await findAvailableSlots(user.google_access_token, startDate, endDate, duration)
+
+            if (slots.length === 0) {
+              return NextResponse.json({
+                success: true,
+                response: `No available ${duration}-minute slots found in the next ${daysAhead} days.`,
+                emailsFound: relevantEmails.length,
+                contactsFound: relevantContacts.length
+              })
+            }
+
+            let response = `Here are available ${duration}-minute time slots:\n\n`
+            slots.forEach((slot, i) => {
+              response += `${i + 1}. ${slot.start.toLocaleString()} - ${slot.end.toLocaleTimeString()}\n`
+            })
+
+            return NextResponse.json({
+              success: true,
+              response,
+              emailsFound: relevantEmails.length,
+              contactsFound: relevantContacts.length,
+              actionTaken: 'availability_checked'
+            })
+          } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+            return NextResponse.json({
+              success: true,
+              response: `Error checking availability: ${errorMessage}`,
+              emailsFound: relevantEmails.length,
+              contactsFound: relevantContacts.length
+            })
+          }
+        }
+
+        // CREATE CALENDAR EVENT
+        if (functionName === 'create_calendar_event') {
+          try {
+            if (!user?.google_access_token) {
+              return NextResponse.json({
+                success: true,
+                response: 'I cannot create calendar events because your Google account is not connected.',
+                emailsFound: relevantEmails.length,
+                contactsFound: relevantContacts.length
+              })
+            }
+
+            const startTime = new Date(args.start_time)
+            const duration = args.duration_minutes || 60
+            const endTime = new Date(startTime.getTime() + duration * 60000)
+
+            await createCalendarEvent(
+              user.google_access_token,
+              args.title,
+              startTime,
+              endTime,
+              args.description,
+              args.attendees,
+              args.location
+            )
+
+            let response = `✓ Calendar event created!\n\n`
+            response += `Title: ${args.title}\n`
+            response += `When: ${startTime.toLocaleString()}\n`
+            response += `Duration: ${duration} minutes\n`
+            if (args.location) response += `Location: ${args.location}\n`
+            if (args.attendees && args.attendees.length > 0) {
+              response += `Attendees: ${args.attendees.join(', ')}\n`
+              response += `\n(Calendar invites sent to all attendees)`
+            }
+
+            return NextResponse.json({
+              success: true,
+              response,
+              emailsFound: relevantEmails.length,
+              contactsFound: relevantContacts.length,
+              actionTaken: 'event_created'
+            })
+          } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+            return NextResponse.json({
+              success: true,
+              response: `Error creating event: ${errorMessage}`,
+              emailsFound: relevantEmails.length,
+              contactsFound: relevantContacts.length
+            })
+          }
+        }
       }
     }
 
-    // Regular response (no tool call)
     return NextResponse.json({
       success: true,
       response: choice.message.content || 'Sorry, I could not generate a response.',
