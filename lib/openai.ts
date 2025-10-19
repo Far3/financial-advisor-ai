@@ -40,24 +40,40 @@ export async function chatCompletion(messages: ChatMessage[]) {
 }
 
 type Tool = {
-  type: string;
+  type: 'function';
   function: {
     name: string;
     description: string;
-    parameters: Record<string, unknown>;
+    parameters: {
+      type: string;
+      properties: Record<string, unknown>;
+      required?: string[];
+    };
   };
 }
+
 
 // Function calling version
 export async function chatCompletionWithTools(
   messages: ChatMessage[],
-  tools: Tool[]
+    tools: Array<{
+    type: 'function';
+    function: {
+      name: string;
+      description: string;
+      parameters: {
+        type: string;
+        properties: Record<string, unknown>;
+        required?: string[];
+      };
+    };
+  }>
 ) {
   try {
     const response = await openai.chat.completions.create({
       model: 'gpt-4',
       messages: messages as Array<{ role: 'system' | 'user' | 'assistant', content: string }>,
-      tools: tools.length > 0 ? tools as any : undefined, // Only include if tools exist
+      tools: tools,
       tool_choice: tools.length > 0 ? 'auto' : undefined,
       temperature: 0.7,
       max_tokens: 500
