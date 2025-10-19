@@ -57,7 +57,8 @@ export async function chatCompletionWithTools(
     const response = await openai.chat.completions.create({
       model: 'gpt-4',
       messages: messages as Array<{ role: 'system' | 'user' | 'assistant', content: string }>,
-      tool_choice: 'auto',
+      tools: tools.length > 0 ? tools as any : undefined, // Only include if tools exist
+      tool_choice: tools.length > 0 ? 'auto' : undefined,
       temperature: 0.7,
       max_tokens: 500
     })

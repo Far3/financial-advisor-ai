@@ -6,7 +6,7 @@ export async function GET() {
   const redirectUri = 'http://localhost:3000/api/auth/hubspot/callback'
   
   // Get current user ID from cookie
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   const userId = cookieStore.get('user_id')?.value
   
   if (!userId) {

@@ -6,7 +6,7 @@ export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams
   const code = searchParams.get('code')
   
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   const userId = cookieStore.get('user_id')?.value
   
   if (!code || !userId) {
