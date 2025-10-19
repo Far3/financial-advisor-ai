@@ -1,16 +1,79 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 
-export default function Home() {
+function ChatInterface() {
   const searchParams = useSearchParams()
   const userId = searchParams.get('user')
-  const [messages, setMessages] = useState<Array<{ role: string, content: string }>>([])
+  const [messages, setMessages] = useState<Array<{role: string, content: string}>>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
+
+  const syncGmail = async () => {
+    setSyncing(true)
+    setSyncMessage('Syncing emails...')
+    
+    try {
+      const response = await fetch('/api/sync/gmail', { method: 'POST' })
+      const data = await response.json()
+      
+      if (data.success) {
+        setSyncMessage(data.message)
+      } else {
+        setSyncMessage(`Error: ${data.error}`)
+      }
+    } catch (error) {
+      console.error('Sync error:', error)
+      setSyncMessage('Sync failed')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  const sendMessage = async () => {
+    if (!input.trim() || loading) return
+    
+    const userMessage = { role: 'user', content: input }
+    setMessages(prev => [...prev, userMessage])
+    setInput('')
+    setLoading(true)
+    
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: input,
+          conversationHistory: messages
+        })
+      })
+      
+      const data = await response.json()
+      
+      if (data.success) {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: data.response + (data.emailsFound > 0 ? `\n\n_(Found ${data.emailsFound} relevant emails)_` : '')
+        }])
+      } else {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `Error: ${data.error}`
+        }])
+      }
+    } catch (error) {
+      console.error('Message error:', error)
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: 'Sorry, something went wrong. Please try again.'
+      }])
+    } finally {
+      setLoading(false)
+    }
+  }
 
   if (!userId) {
     return (
@@ -31,67 +94,6 @@ export default function Home() {
     )
   }
 
-  const syncGmail = async () => {
-    setSyncing(true)
-    setSyncMessage('Syncing emails...')
-
-    try {
-      const response = await fetch('/api/sync/gmail', { method: 'POST' })
-      const data = await response.json()
-
-      if (data.success) {
-        setSyncMessage(data.message)
-      } else {
-        setSyncMessage(`Error: ${data.error}`)
-      }
-    } catch (error) {
-      setSyncMessage('Sync failed')
-    } finally {
-      setSyncing(false)
-    }
-  }
-
-const sendMessage = async () => {
-  if (!input.trim() || loading) return
-  
-  const userMessage = { role: 'user', content: input }
-  setMessages(prev => [...prev, userMessage])
-  setInput('')
-  setLoading(true)
-  
-  try {
-    const response = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: input,
-        conversationHistory: messages
-      })
-    })
-    
-    const data = await response.json()
-    
-    if (data.success) {
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: data.response + (data.emailsFound > 0 ? `\n\n_(Found ${data.emailsFound} relevant emails)_` : '')
-      }])
-    } else {
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: `Error: ${data.error}`
-      }])
-    }
-  } catch (error) {
-    setMessages(prev => [...prev, {
-      role: 'assistant',
-      content: 'Sorry, something went wrong. Please try again.'
-    }])
-  } finally {
-    setLoading(false)
-  }
-}
-
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Header */}
@@ -109,7 +111,7 @@ const sendMessage = async () => {
             >
               {syncing ? 'Syncing...' : 'Sync Gmail'}
             </button>
-
+            
             {searchParams.get('hubspot') === 'connected' ? (
               <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">
                 ✓ HubSpot Connected
@@ -141,18 +143,19 @@ const sendMessage = async () => {
             <p className="text-sm mt-2">Try: &quot;Who mentioned their kid plays baseball?&quot;</p>
           </div>
         )}
-
+        
         {messages.map((msg, i) => (
           <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[70%] rounded-lg px-4 py-2 ${msg.role === 'user'
-              ? 'bg-blue-600 text-white'
-              : 'bg-white border shadow-sm'
-              }`}>
+            <div className={`max-w-[70%] rounded-lg px-4 py-2 ${
+              msg.role === 'user' 
+                ? 'bg-blue-600 text-white' 
+                : 'bg-white border shadow-sm'
+            }`}>
               {msg.content}
             </div>
           </div>
         ))}
-
+        
         {loading && (
           <div className="flex justify-start">
             <div className="bg-white border shadow-sm rounded-lg px-4 py-2">
@@ -187,5 +190,17 @@ const sendMessage = async () => {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-gray-600">Loading...</div>
+      </div>
+    }>
+      <ChatInterface />
+    </Suspense>
   )
 }

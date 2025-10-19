@@ -6,14 +6,26 @@ import { chatCompletionWithTools } from '@/lib/openai'
 import { sendEmail } from '@/lib/gmail'
 
 // Define available tools
-const tools = [
+// Define available tools
+const tools: Array<{
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: {
+      type: string;
+      properties: Record<string, unknown>;
+      required?: string[];
+    };
+  };
+}> = [
   {
-    type: 'function' as const,
+    type: 'function',
     function: {
       name: 'send_email',
       description: 'Send an email to someone via Gmail',
       parameters: {
-        type: 'object' as const,
+        type: 'object',
         properties: {
           to: {
             type: 'string',
@@ -32,7 +44,7 @@ const tools = [
       }
     }
   }
-] as const
+]
 
 export async function POST(request: NextRequest) {
   try {
@@ -103,12 +115,13 @@ Answer questions based on the email data above.`
     // Get GPT response with function calling
     const choice = await chatCompletionWithTools(messages, tools)
 
-    // Check if GPT wants to call a function
-    if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
-      const toolCall = choice.message.tool_calls[0]
-
-      if (toolCall.function.name === 'send_email') {
-        const args = JSON.parse(toolCall.function.arguments)
+// Check if GPT wants to call a function
+if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
+  const toolCall = choice.message.tool_calls[0]
+  
+  // Check if it's a function tool call
+  if (toolCall.type === 'function' && toolCall.function.name === 'send_email') {
+    const args = JSON.parse(toolCall.function.arguments)
 
         console.log('Sending email:', args)
 
