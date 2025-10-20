@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 
 export async function GET(request: Request) {
-  // Verify auth token
   const authHeader = request.headers.get('authorization')
   
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -9,25 +8,39 @@ export async function GET(request: Request) {
   }
   
   try {
-    // Get the base URL
     const baseUrl = process.env.RENDER_EXTERNAL_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
     
-    // Call the monitor endpoint
-    const response = await fetch(`${baseUrl}/api/monitor-emails`, {
+    console.log('=== CRON JOB START ===')
+    
+    // STEP 1: Sync emails first
+    console.log('Step 1: Syncing emails...')
+    const syncResponse = await fetch(`${baseUrl}/api/sync-emails`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       }
     })
     
-    const data = await response.json()
+    const syncData = await syncResponse.json()
+    console.log('Email sync result:', syncData)
     
-    console.log('Cron job completed:', data)
+    // STEP 2: Monitor for task responses
+    console.log('Step 2: Monitoring for responses...')
+    const monitorResponse = await fetch(`${baseUrl}/api/monitor-emails`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    })
+    
+    const monitorData = await monitorResponse.json()
+    console.log('Monitor result:', monitorData)
     
     return NextResponse.json({
       success: true,
       timestamp: new Date().toISOString(),
-      ...data
+      sync: syncData,
+      monitor: monitorData
     })
   } catch (error) {
     console.error('Cron error:', error)
@@ -37,7 +50,6 @@ export async function GET(request: Request) {
   }
 }
 
-// Also support POST for flexibility
 export async function POST(request: Request) {
   return GET(request)
 }
