@@ -19,6 +19,34 @@ export default function MarketWidget() {
   const [error, setError] = useState<string | null>(null)
 
   const fetchMarketData = async () => {
+  try {
+    const API_KEY = process.env.NEXT_PUBLIC_TWELVE_DATA_KEY || 'demo'
+    
+    const response = await fetch(
+      `https://api.twelvedata.com/quote?symbol=SPY&apikey=${API_KEY}`
+    )
+    
+    const data = await response.json()
+    
+    if (data.price) {
+      setMarketData({
+        price: parseFloat(data.price),
+        change: parseFloat(data.change),
+        changePercent: parseFloat(data.percent_change),
+        high: parseFloat(data.high),
+        low: parseFloat(data.low),
+        open: parseFloat(data.open),
+        previousClose: parseFloat(data.previous_close)
+      })
+    }
+    
+    setError(null)
+  } catch (err) {
+    setError('Failed to fetch market data')
+    console.error('Market data error:', err)
+  } finally {
+    setLoading(false)
+  }
     try {
       // Using Alpha Vantage free API
       // Get your free API key from: https://www.alphavantage.co/support/#api-key
