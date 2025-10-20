@@ -213,7 +213,7 @@ function ChatInterface() {
               <p className="text-gray-400 mb-8">Ask me anything about your emails, calendar, or contacts</p>
               <div className="grid gap-3 text-left max-w-2xl mx-auto">
                 <div className="bg-[#1A1F2E] border border-[#252B3B] rounded-xl p-4 hover:border-[#2A3142] transition-colors cursor-pointer">
-                  <p className="text-gray-300 text-sm">What's on my calendar this week?</p>
+                  <p className="text-gray-300 text-sm">What&apos;s on my calendar this week?</p>
                 </div>
                 <div className="bg-[#1A1F2E] border border-[#252B3B] rounded-xl p-4 hover:border-[#2A3142] transition-colors cursor-pointer">
                   <p className="text-gray-300 text-sm">Schedule a meeting with Sara Smith</p>
