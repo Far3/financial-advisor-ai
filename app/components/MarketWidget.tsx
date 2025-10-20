@@ -19,59 +19,34 @@ export default function MarketWidget() {
   const [error, setError] = useState<string | null>(null)
 
   const fetchMarketData = async () => {
-  try {
-    const API_KEY = process.env.NEXT_PUBLIC_TWELVE_DATA_KEY || 'demo'
-    
-    const response = await fetch(
-      `https://api.twelvedata.com/quote?symbol=SPY&apikey=${API_KEY}`
-    )
-    
-    const data = await response.json()
-    
-    if (data.price) {
-      setMarketData({
-        price: parseFloat(data.price),
-        change: parseFloat(data.change),
-        changePercent: parseFloat(data.percent_change),
-        high: parseFloat(data.high),
-        low: parseFloat(data.low),
-        open: parseFloat(data.open),
-        previousClose: parseFloat(data.previous_close)
-      })
-    }
-    
-    setError(null)
-  } catch (err) {
-    setError('Failed to fetch market data')
-    console.error('Market data error:', err)
-  } finally {
-    setLoading(false)
-  }
     try {
-      // Using Alpha Vantage free API
-      // Get your free API key from: https://www.alphavantage.co/support/#api-key
-      const API_KEY = process.env.NEXT_PUBLIC_ALPHA_VANTAGE_KEY || 'demo'
+      // Using Twelve Data API
+      // Get your free API key from: https://twelvedata.com/
+      const API_KEY = process.env.NEXT_PUBLIC_TWELVE_DATA_KEY || 'demo'
       
       const response = await fetch(
-        `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=SPY&apikey=${API_KEY}`
+        `https://api.twelvedata.com/quote?symbol=SPY&apikey=${API_KEY}`
       )
       
       const data = await response.json()
       
-      if (data['Global Quote']) {
-        const quote = data['Global Quote']
+      // Check if we got valid data
+      if (data.close) {
         setMarketData({
-          price: parseFloat(quote['05. price']),
-          change: parseFloat(quote['09. change']),
-          changePercent: parseFloat(quote['10. change percent'].replace('%', '')),
-          high: parseFloat(quote['03. high']),
-          low: parseFloat(quote['04. low']),
-          open: parseFloat(quote['02. open']),
-          previousClose: parseFloat(quote['08. previous close'])
+          price: parseFloat(data.close),
+          change: parseFloat(data.change),
+          changePercent: parseFloat(data.percent_change),
+          high: parseFloat(data.high),
+          low: parseFloat(data.low),
+          open: parseFloat(data.open),
+          previousClose: parseFloat(data.previous_close)
         })
+        setError(null)
+      } else if (data.message) {
+        // Handle API error messages (like rate limit)
+        setError(data.message)
       }
       
-      setError(null)
     } catch (err) {
       setError('Failed to fetch market data')
       console.error('Market data error:', err)
@@ -83,7 +58,7 @@ export default function MarketWidget() {
   useEffect(() => {
     fetchMarketData()
     
-    // Update every 60 seconds (Alpha Vantage has rate limits)
+    // Update every 60 seconds (Twelve Data allows 8 requests/minute on free tier)
     const interval = setInterval(fetchMarketData, 60000)
     
     return () => clearInterval(interval)
@@ -102,6 +77,7 @@ export default function MarketWidget() {
     return (
       <div className="bg-[#1A1F2E] border border-[#252B3B] rounded-xl p-4">
         <p className="text-gray-500 text-sm">Market data unavailable</p>
+        {error && <p className="text-gray-600 text-xs mt-1">{error}</p>}
       </div>
     )
   }
