@@ -5,6 +5,14 @@ import OpenAI from 'openai'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
+interface MessagePart {
+  mimeType?: string;
+  body?: {
+    data?: string;
+  };
+  parts?: MessagePart[];
+}
+
 export async function POST() {
   console.log('=== EMAIL SYNC START ===')
   
@@ -106,9 +114,8 @@ export async function POST() {
             const fromEmail = from.match(/<(.+?)>/)?.[1] || from.trim()
             const toEmail = to.match(/<(.+?)>/)?.[1] || to.trim()
             
-            // Get body
-            let body = ''
-            const getPart = (part: any): string => {
+            // Get body - recursive function with proper typing
+            const getPart = (part: MessagePart): string => {
               if (part.mimeType === 'text/plain' && part.body?.data) {
                 return Buffer.from(part.body.data, 'base64').toString('utf-8')
               }
@@ -121,8 +128,9 @@ export async function POST() {
               return ''
             }
             
+            let body = ''
             if (fullMessage.payload) {
-              body = getPart(fullMessage.payload)
+              body = getPart(fullMessage.payload as MessagePart)
             }
             
             // Clean and limit body
