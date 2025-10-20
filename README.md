@@ -89,28 +89,35 @@ Run development server: ```npm run dev```
 - "Find emails from last week about estate planning and create a task"
 
 
-Required API Keys:
-Supabase
-Go to supabase.com
-Create a new project
-Go to Settings → API
-Copy Project URL → NEXT_PUBLIC_SUPABASE_URL
-Copy anon public key → NEXT_PUBLIC_SUPABASE_ANON_KEY
-Copy service_role key → SUPABASE_SERVICE_ROLE_KEY
-OpenAI
-Go to platform.openai.com
-Create API key → OPENAI_API_KEY
-Google (Gmail & Calendar)
-Go to console.cloud.google.com
-Create new project
-Enable Gmail API and Google Calendar API
-Create OAuth 2.0 credentials
-Add authorized redirect URI: http://localhost:3000/api/auth/google/callback
-Copy Client ID → GOOGLE_CLIENT_ID
-Copy Client Secret → GOOGLE_CLIENT_SECRET
-HubSpot (Optional)
-Go to developers.hubspot.com
-Create app
+### Required API Keys:
+1. Supabase
+- Go to supabase.com
+- Create a new project
+- Go to Settings → API
+- Copy Project URL → NEXT_PUBLIC_SUPABASE_URL
+- Copy anon public key → NEXT_PUBLIC_SUPABASE_ANON_KEY
+- Copy service_role key → SUPABASE_SERVICE_ROLE_KEY
+
+2. OpenAI
+- Go to platform.openai.com
+- Create API key → OPENAI_API_KEY
+
+3. Google (Gmail & Calendar)
+- Go to console.cloud.google.com
+- Create new project
+- Enable Gmail API and Google Calendar API
+
+4. Create OAuth 2.0 credentials
+- Add authorized redirect URI: http://localhost:3000/api/auth/google/callback
+- Copy Client ID → GOOGLE_CLIENT_ID
+- Copy Client Secret → GOOGLE_CLIENT_SECRET
+
+5. HubSpot (Optional)
+- Go to developers.hubspot.com
+- Create app
+- Add redirect URI: http://localhost:3000/api/auth/hubspot/callback
+- Copy Client ID → HUBSPOT_CLIENT_ID
+- Copy Client Secret → HUBSPOT_CLIENT_SECRET
 Add redirect URI: http://localhost:3000/api/auth/hubspot/callback
 Copy Client ID → HUBSPOT_CLIENT_ID
 Copy Client Secret → HUBSPOT_CLIENT_SECRET
