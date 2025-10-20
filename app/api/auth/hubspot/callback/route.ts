@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
         grant_type: 'authorization_code',
         client_id: process.env.HUBSPOT_CLIENT_ID!,
         client_secret: process.env.HUBSPOT_CLIENT_SECRET!,
-        redirect_uri: 'http://localhost:3000/api/auth/hubspot/callback',
+        redirect_uri: 'https://financial-advisor-ai-vxoz.onrender.com/api/auth/hubspot/callback',
         code
       })
     })

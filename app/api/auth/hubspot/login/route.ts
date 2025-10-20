@@ -3,7 +3,7 @@ import { cookies } from 'next/headers'
 
 export async function GET() {
   const clientId = process.env.HUBSPOT_CLIENT_ID
-  const redirectUri = 'http://localhost:3000/api/auth/hubspot/callback'
+  const redirectUri = 'https://financial-advisor-ai-vxoz.onrender.com/api/auth/hubspot/callback'
   
   // Get current user ID from cookie
   const cookieStore = await cookies()
